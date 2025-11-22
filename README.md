@@ -127,52 +127,67 @@ WIDTH=320 HEIGHT=240 ./auto_bench_image_latency.sh
 包 `image_latency_test`：
 
 - `image_publisher_node`
-  - 发布 `sensor_msgs/msg/Image`（`rgb8`），话题 `test_image`
-  - 预分配缓冲，在定时器回调中构造消息：
-    - `header.stamp = now()`（紧挨 `publish()`）
-    - 有一次从预生成缓冲到消息的数据拷贝
+  - 发布 `sensor_msgs/msg/Image`（`rgb8`），话题 `test_image`。
+  - 启动时预生成一块只读图像缓冲区（对应目标分辨率），后续周期复用。
+  - 在定时器回调中：
+    1. 构造 `sensor_msgs::msg::Image`，从预生成缓冲区拷贝一帧到 `msg.data`；
+    2. **完成拷贝后**，执行 `msg.header.stamp = now()`；
+    3. 紧接着调用 `publisher_->publish(std::move(msg))`。
+  - 因此订阅端计算的 `now() - msg.header.stamp` 只覆盖：
+    - ROS 2 通信路径（多进程 / intra-process）和调度开销，
+    - **不包含** 从预生成缓冲到消息的数据拷贝时间。
+
 - `image_subscriber_node`
-  - 订阅 `test_image`
-  - 回调中计算 `now() - msg.header.stamp`，周期打印平均延迟
+  - 订阅 `test_image`。
+  - 回调中读取 `msg.header.stamp`，计算 `now() - msg.header.stamp`，周期性打印平均延迟。
+  - 该延迟仅反映 **消息从发布端打时间戳到订阅回调触发** 的时间。
+
 - `intra_process_image_latency`
-  - 发布 / 订阅在同一进程
-  - 显式启用 intra-process 通信
-  - 发布使用 `std::unique_ptr<Image>`，订阅为 `Image::UniquePtr`
+  - 发布 / 订阅在同一进程中。
+  - 显式启用 intra-process 通信。
+  - 发布端使用 `std::unique_ptr<Image>`，订阅端使用 `Image::UniquePtr`。
+  - 时间戳打点顺序与多进程版本保持一致：**先拷贝，后 stamp，再 publish**，因此测得的是 intra-process 路径本身的开销，同样不含帧拷贝时间。
 
 脚本 `auto_bench_image_latency.sh`：
 
-- 找不到可执行文件时自动 `colcon build`
-- 按“多进程 → intra-process”顺序运行
-- 用 `pidstat -u 1 -p <PID>` 分别记录 pub/sub/intra 进程 CPU 占用
+- 按“多进程 pub/sub → intra-process 单进程”顺序运行。
+- 用 `pidstat -u 1 -p <PID>` 分别记录 pub、sub、intra 三个进程/实例的 CPU 占用。
+
+---
 
 ### LibXR
 
 程序 `libxr_tp_test.cpp`（单一可执行），对两个分辨率依次执行：
 
-- 为每种帧类型（1440×1080 / 320×240）创建 `Topic<Frame>`
-- 注册：
-  - 一个同步订阅者（独立线程 `Wait()`）
-  - 一个回调订阅者（收到帧立刻执行回调）
-- 主线程以 30 Hz 发送 `NUM_FRAMES = 300` 帧：
-  - 写入宽、高、帧序号
-  - 填充 RGB888 数据
-  - 记录每帧发布时刻 `g_pub_time[seq]`
-  - 调用 `Publish()`
+- 为每种帧类型（1440×1080 / 320×240）创建 `Topic<Frame>`。
+- 注册两个订阅者：
+  - 一个同步订阅者（独立线程调用 `Wait()`）；
+  - 一个回调订阅者（收到帧立刻执行回调函数）。
 
-回调中：
+- 主线程以 30 Hz 发送 `NUM_FRAMES = 300` 帧，每帧流程为：
+  1. 填充对应分辨率的 RGB888 数据到帧缓冲；
+  2. **完成帧填充后**，记录 `g_pub_time[seq] = now()`；
+  3. 调用 `topic.Publish(frame)`。
 
-1. 根据 `seq` 计算 **发布 → 回调入口** 延迟；
-2. 进行一次完整帧拷贝到业务缓冲区；
-3. 额外执行两次完整帧拷贝并分别计时：
-   - 一次使用 `std::memcpy`
-   - 一次使用 `LibXR::Memory::FastCopy`
-4. 同步订阅线程在 `Wait()` 返回后，根据 `seq` 计算 **发布 → Wait 成功** 延迟。
+  因此，所有用 `g_pub_time[seq]` 作为起点的延迟统计，**不包含帧填充时间**。
+
+- 回调订阅者中：
+  1. 根据 `seq` 查 `g_pub_time[seq]`，计算 **发布 → 回调入口** 延迟；
+  2. 再进行一次完整帧拷贝到业务缓冲区（模拟真实处理逻辑）；
+  3. 额外执行两次完整帧拷贝并分别计时：
+     - 一次使用 `std::memcpy`；
+     - 一次使用 `LibXR::Memory::FastCopy`。
+  4. 这些 memcpy/FastCopy 的计时仅反映 **业务侧额外拷贝** 的成本，与“发布 → 回调入口”的延迟解耦。
+
+- 同步订阅线程：
+  - 独立线程中循环调用 `topic.Wait(frame)`。
+  - 当 `Wait()` 返回时，根据帧内的 `seq` 和 `g_pub_time[seq]` 计算 **发布 → Wait 成功** 的延迟。
+  - LibXR 的同步订阅在内部会将消息拷贝 / 迁移到订阅线程可见的缓冲区，以保证跨线程安全；
 
 脚本 `auto_bench_libxr_image_latency.sh`：
 
-- 找不到 `libxr_tp_test` 时自动 `colcon build`
-- 启动程序的同时用 `pidstat` 记录 CPU 占用
-- 从日志中抽取 `[RESULT]` 行，并统计整体 CPU 占用
+- 启动基准程序的同时，用 `pidstat` 记录整个进程 CPU 占用。
+- 从程序日志中抽取 `[RESULT]` 行，并汇总延迟统计和 CPU 占用。
 
 ---
 
