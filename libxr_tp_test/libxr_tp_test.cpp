@@ -54,14 +54,16 @@ struct LatencyStats {
 static std::array<TimePoint, NUM_FRAMES> g_pub_time{};
 
 // 回调 & 同步统计
-static LatencyStats g_cb_entry_stats; // 发布 -> 回调入口
-static LatencyStats g_cb_copy_stats;  // 回调里的额外拷贝
-static LatencyStats g_sync_stats;     // 发布 -> Sync Wait OK
+static LatencyStats g_cb_entry_stats;    // 发布 -> 回调入口
+static LatencyStats g_cb_memcpy_stats;   // 回调里的 memcpy 拷贝
+static LatencyStats g_cb_fastcopy_stats; // 回调里的 FastCopy 拷贝
+static LatencyStats g_sync_stats;        // 发布 -> Sync Wait OK
 
 static void ResetStats() {
   g_pub_time.fill(TimePoint{});
   g_cb_entry_stats = LatencyStats{};
-  g_cb_copy_stats = LatencyStats{};
+  g_cb_memcpy_stats = LatencyStats{};
+  g_cb_fastcopy_stats = LatencyStats{};
   g_sync_stats = LatencyStats{};
 }
 
@@ -121,18 +123,27 @@ void RunImageTest(const char *label, const char *topic_name,
           }
         }
 
-        // ② 回调里：先正常拷贝一次，再额外拷贝一次，测“额外 copy”的耗时
-        *dst = *src; // 正常 copy（比如业务逻辑）
+        // 先正常拷贝一次到业务缓冲（保持原来的语义）
+        *dst = *src;
+
+        // ② memcpy vs FastCopy 对比：拷贝整个 Frame 结构
+        static Frame memcpy_buf;
+        static Frame fastcopy_buf;
+
+        auto t1 = Clock::now();
+        std::memcpy(&memcpy_buf, src, sizeof(Frame));
         auto t2 = Clock::now();
-        *dst = *src; // 额外 copy，用来测 copy 开销
+        LibXR::Memory::FastCopy(&fastcopy_buf, src, sizeof(Frame));
         auto t3 = Clock::now();
 
-        double extra_copy_us =
-            std::chrono::duration_cast<Micro>(t3 - t2).count();
-        g_cb_copy_stats.add(extra_copy_us);
+        double memcpy_us = std::chrono::duration_cast<Micro>(t2 - t1).count();
+        double fastcopy_us = std::chrono::duration_cast<Micro>(t3 - t2).count();
 
-        XR_LOG_DEBUG("[CB][%ux%u] seq=%u extra_copy=%.3f us", Frame::WIDTH,
-                     Frame::HEIGHT, seq, extra_copy_us);
+        g_cb_memcpy_stats.add(memcpy_us);
+        g_cb_fastcopy_stats.add(fastcopy_us);
+
+        XR_LOG_DEBUG("[CB][%ux%u] seq=%u memcpy=%.3f us fastcopy=%.3f us",
+                     Frame::WIDTH, Frame::HEIGHT, seq, memcpy_us, fastcopy_us);
       },
       cb_frame.get());
 
@@ -205,7 +216,9 @@ void RunImageTest(const char *label, const char *topic_name,
   XR_LOG_PASS("===== Stats for %s (%ux%u) =====", label, Frame::WIDTH,
               Frame::HEIGHT);
   g_cb_entry_stats.log("Callback entry latency (Publish -> CB)");
-  g_cb_copy_stats.log("Callback extra copy latency (2nd copy in CB)");
+  g_cb_memcpy_stats.log("Callback memcpy latency (std::memcpy Frame)");
+  g_cb_fastcopy_stats.log(
+      "Callback FastCopy latency (LibXR::Memory::FastCopy Frame)");
   g_sync_stats.log("Sync subscriber latency (Publish -> Wait OK)");
   XR_LOG_PASS("===== Test %s (%ux%u) END =====", label, Frame::WIDTH,
               Frame::HEIGHT);

@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.8)
 project(image_latency_test)
 
+add_compile_options(-g -O3)
+
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 17)
 endif()
