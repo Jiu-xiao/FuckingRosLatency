@@ -9,7 +9,7 @@ jobs:
 
     env:
       ROS_DISTRO: humble
-      WS: ${{ github.workspace }}/ros2_ws
+      WS: ${{ github.workspace }}/ros2_ws }
 
     steps:
       - name: Checkout repo
@@ -59,7 +59,9 @@ jobs:
           # 拷贝自动测试脚本
           cd "$WS"
           cp "${GITHUB_WORKSPACE}/auto_bench_image_latency.sh" .
+          cp "${GITHUB_WORKSPACE}/auto_bench_libxr_image_latency.sh" .
           chmod +x ./auto_bench_image_latency.sh
+          chmod +x ./auto_bench_libxr_image_latency.sh
 
       - name: Build workspace (image_latency_test + libxr_tp_test)
         run: |
@@ -87,7 +89,7 @@ jobs:
           set -e
           source /opt/ros/${ROS_DISTRO}/setup.bash
           cd "$WS"
-          ./build/libxr_tp_test/libxr_tp_test
+          ./auto_bench_libxr_image_latency.sh
 
       - name: Upload logs
         uses: actions/upload-artifact@v4
