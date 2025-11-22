@@ -1,0 +1,74 @@
+name: ROS2 Image Latency Benchmark
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  bench:
+    runs-on: ubuntu-22.04
+
+    env:
+      ROS_DISTRO: humble
+      WS: ${{ github.workspace }}/ros2_ws
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install ROS2 Humble and tools
+        run: |
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y curl gnupg2 lsb-release
+
+          # ROS2 apt 源
+          sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+            -o /usr/share/keyrings/ros-archive-keyring.gpg
+
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
+          http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" \
+          | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
+          sudo apt-get update
+          sudo apt-get install -y \
+            ros-humble-ros-base \
+            python3-colcon-common-extensions \
+            build-essential \
+            cmake \
+            sysstat
+
+      - name: Prepare workspace
+        run: |
+          set -e
+          mkdir -p "$WS/src"
+          # 仓库根目录下必须有：src/image_latency_test 和 auto_bench_image_latency.sh
+          cp -r src/image_latency_test "$WS/src/"
+          cp auto_bench_image_latency.sh "$WS/"
+          chmod +x "$WS/auto_bench_image_latency.sh"
+
+      - name: Build image_latency_test
+        run: |
+          set -e
+          source /opt/ros/${ROS_DISTRO}/setup.bash
+          cd "$WS"
+          colcon build --packages-select image_latency_test
+
+      - name: Run benchmark 1440x1080
+        run: |
+          set -e
+          source /opt/ros/${ROS_DISTRO}/setup.bash
+          cd "$WS"
+          ./auto_bench_image_latency.sh
+
+      - name: Run benchmark 320x240
+        run: |
+          set -e
+          source /opt/ros/${ROS_DISTRO}/setup.bash
+          cd "$WS"
+          WIDTH=320 HEIGHT=240 ./auto_bench_image_latency.sh
+
+      - name: Upload logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-latency-logs
+          path: ${{ env.WS }}/logs
