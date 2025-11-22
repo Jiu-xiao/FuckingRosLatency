@@ -35,7 +35,11 @@ jobs:
             python3-colcon-common-extensions \
             build-essential \
             cmake \
-            sysstat
+            sysstat \
+            pkg-config \
+            libudev-dev \
+            libwpa-client-dev \
+            libnm-dev
 
       - name: Prepare workspace
         run: |
@@ -45,7 +49,7 @@ jobs:
           # 拷贝 ROS2 benchmark 包
           cp -r src/image_latency_test "$WS/src/"
 
-          # 拷贝 libxr_tp_test 包（只要你仓库根目录有这个目录）
+          # 拷贝 libxr_tp_test 包
           cp -r libxr_tp_test "$WS/src/"
 
           # 在 libxr_tp_test 里克隆 LibXR 源码到 libxr 子目录
