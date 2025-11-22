@@ -53,7 +53,6 @@ private:
   void on_timer()
   {
     sensor_msgs::msg::Image msg;
-    msg.header.stamp = this->now();
     msg.header.frame_id = "camera";
     msg.height = static_cast<std::uint32_t>(height_);
     msg.width  = static_cast<std::uint32_t>(width_);
@@ -61,7 +60,7 @@ private:
     msg.is_bigendian = false;
     msg.step = msg.width * 3;
     msg.data = image_data_;
-
+    msg.header.stamp = this->now();
     publisher_->publish(std::move(msg));
   }
 

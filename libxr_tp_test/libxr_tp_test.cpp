@@ -1,5 +1,6 @@
 #include "libxr.hpp"
 #include "libxr_def.hpp"
+#include "logger.hpp"
 #include "message.hpp"
 
 #include <array>
@@ -183,11 +184,11 @@ void RunImageTest(const char *label, const char *topic_name,
   for (uint32_t seq = 0; seq < NUM_FRAMES; ++seq) {
     frame->seq = seq;
 
-    // 记录发布时间（给 entry/sync 统计用）
-    g_pub_time[seq] = Clock::now();
-
     // 填充一点数据，模拟图像负载
     std::memset(frame->data, static_cast<int>(seq & 0xFF), sizeof(frame->data));
+
+    // 记录发布时间（给 entry/sync 统计用）
+    g_pub_time[seq] = Clock::now();
 
     topic.Publish(*frame);
 
@@ -219,9 +220,11 @@ int main() {
   LibXR::Topic::Domain domain("image_domain");
 
   // 大图 1440x1080
+  XR_LOG_PASS("Run test image_1440x1080");
   RunImageTest<ImageFrame1440>("image_1440x1080", "camera/image_1440", domain);
 
   // 小图 320x240
+  XR_LOG_PASS("Run test image_320x240");
   RunImageTest<ImageFrame320>("image_320x240", "camera/image_320", domain);
 
   XR_LOG_PASS("All image latency tests finished");
