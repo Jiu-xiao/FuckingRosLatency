@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>image_latency_test</name>
+  <version>0.0.1</version>
+  <description>Measure image pub/sub latency in ROS 2 Humble (multi-process and intra-process).</description>
+
+  <maintainer email="you@example.com">Your Name</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <build_depend>rclcpp</build_depend>
+  <build_depend>sensor_msgs</build_depend>
+
+  <build_export_depend>rclcpp</build_export_depend>
+  <build_export_depend>sensor_msgs</build_export_depend>
+
+  <exec_depend>rclcpp</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+
+  <export>
+  </export>
+</package>
